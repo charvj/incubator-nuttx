@@ -197,6 +197,11 @@ config ESP32C3_I2C
 	bool
 	default n
 
+config ESP32C3_TWAI
+    bool
+    default n
+    select CAN
+
 config ESP32C3_TIMER
 	bool
 	default n
@@ -251,6 +256,20 @@ config ESP32C3_I2C0
 	bool "I2C 0"
 	default n
 	select ESP32C3_I2C
+
+config ESP32C3_TWAI0
+    bool "TWAI/CAN 0"
+    default n
+    select ESP32C3_TWAI
+
+# Should be relaced
+config ESP32C3_TWAI_REGDEBUG
+    bool "TWAI/CAN Register level debug"
+    depends on DEBUG_CAN_INFO
+    default n
+    ---help---
+        Output detailed register-level TWAI debug information.  Requires also
+        CONFIG_DEBUG_CAN_INFO.
 
 config ESP32C3_RNG
 	bool "Random Number Generator (RNG)"

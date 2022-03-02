@@ -66,12 +66,15 @@
 
 #define TWAI_ID11_MASK   (0x7ff)
 
-/* Bits 0-28: 29-bit Identifiter (FF=1)
+/* Bits 0-28: 29-bit Identifier (FF=1)
  * Bits 29-31: Reserved
  */
 
 #define TWAI_ID29_MASK   (0x1fffffff)
 #define TWAI_DEFAULT_INTERRUPTS   0xE7  /* Exclude data overrun (bit[3]) and brp_div (bit[4]) */
+
+#define ACCEPTANCE_CODE   0x0           /* No pattern required */
+#define ACCEPTANCE_MASK   0xffffffff    /* Enable all */
 
 /* Debug ********************************************************************/
 
@@ -106,16 +109,8 @@ struct up_dev_s
 static void twai_printreg(uint32_t addr, uint32_t value);
 #endif
 
-static uint32_t twai_getreg(struct up_dev_s *priv, int offset);
-static void twai_putreg(struct up_dev_s *priv, int offset, uint32_t value);
-
-#ifdef CONFIG_ESP32C3_TWAI_REGDEBUG
-static uint32_t twai_getcommon(uint32_t addr);
-static void twai_putcommon(uint32_t addr, uint32_t value);
-#else
-#  define twai_getcommon(addr)        getreg32(addr)
-#  define twai_putcommon(addr, value) putreg32(value, addr)
-#endif
+static uint32_t twai_getreg(uint32_t addr);
+static void twai_putreg(uint32_t addr, uint32_t value);
 
 /* TWAI methods */
 
@@ -136,6 +131,11 @@ static bool esp32c3twai_txempty(FAR struct can_dev_s *dev);
 /* TWAI interrupts */
 
 static int esp32c3twai_interrupt(int irq, void *context, FAR void *arg);
+
+/* TWAI acceptance filter */
+
+static void esp32c3twai_set_acc_filter(uint32_t code, uint32_t mask,
+                                       bool single_filter);
 
 /****************************************************************************
  * Private Data
@@ -251,30 +251,27 @@ static void twai_printreg(uint32_t addr, uint32_t value)
  *   Read the value of an TWAI register.
  *
  * Input Parameters:
- *   priv - A reference to the TWAI block status
- *   offset - The offset to the register to read
+ *   addr - The address to the register to read
  *
  * Returned Value:
  *
  ****************************************************************************/
 
 #ifdef CONFIG_ESP32C3_TWAI_REGDEBUG
-static uint32_t twai_getreg(struct up_dev_s *priv, int offset)
+static uint32_t twai_getreg(uint32_t addr)
 {
-  uint32_t addr;
   uint32_t value;
 
   /* Read the value from the register */
 
-  addr  = /* priv->base + */offset;
   value = getreg32(addr);
   twai_printreg(addr, value);
   return value;
 }
 #else
-static uint32_t twai_getreg(struct up_dev_s *priv, int offset)
+static uint32_t twai_getreg(uint32_t addr)
 {
-  return getreg32(/* priv->base + */offset);
+  return getreg32(addr);
 }
 #endif
 
@@ -285,8 +282,7 @@ static uint32_t twai_getreg(struct up_dev_s *priv, int offset)
  *   Set the value of an TWAI register.
  *
  * Input Parameters:
- *   priv - A reference to the TWAI block status
- *   offset - The offset to the register to write
+ *   addr - The address to the register to write
  *   value - The value to write to the register
  *
  * Returned Value:
@@ -295,10 +291,8 @@ static uint32_t twai_getreg(struct up_dev_s *priv, int offset)
  ****************************************************************************/
 
 #ifdef CONFIG_ESP32C3_TWAI_REGDEBUG
-static void twai_putreg(struct up_dev_s *priv, int offset, uint32_t value)
+static void twai_putreg(uint32_t addr, uint32_t value)
 {
-  uint32_t addr = /* priv->base + */offset;
-
   /* Show the register value being written */
 
   caninfo("%08x<-%08x\n", addr, value);
@@ -308,105 +302,11 @@ static void twai_putreg(struct up_dev_s *priv, int offset, uint32_t value)
   putreg32(value, addr);
 }
 #else
-static void twai_putreg(struct up_dev_s *priv, int offset, uint32_t value)
+static void twai_putreg(uint32_t addr, uint32_t value)
 {
-  putreg32(value, /* priv->base + */offset);
-}
-#endif
-
-/****************************************************************************
- * Name: twai_getcommon
- *
- * Description:
- *   Get the value of common register.
- *
- * Input Parameters:
- *   addr - The address of the register to read
- *
- * Returned Value:
- *   None
- *
- ****************************************************************************/
-
-#ifdef CONFIG_ESP32C3_TWAI_REGDEBUG
-static uint32_t twai_getcommon(uint32_t addr)
-{
-  uint32_t value;
-
-  /* Read the value from the register */
-
-  value = getreg32(addr);
-  twai_printreg(addr, value);
-  return value;
-}
-#endif
-
-/****************************************************************************
- * Name: twai_putcommon
- *
- * Description:
- *   Set the value of common register.
- *
- * Input Parameters:
- *   addr - The address of the register to write
- *   value - The value to write to the register
- *
- * Returned Value:
- *   None
- *
- ****************************************************************************/
-
-#ifdef CONFIG_ESP32C3_TWAI_REGDEBUG
-static void twai_putcommon(uint32_t addr, uint32_t value)
-{
-  /* Show the register value being written */
-
-  caninfo("%08x<-%08x\n", addr, value);
-
-  /* Write the value */
-
   putreg32(value, addr);
 }
 #endif
-
-#define HAL_SWAP16(d) __builtin_bswap16((d))
-#define HAL_SWAP32(d) __builtin_bswap32((d))
-#define HAL_SWAP64(d) __builtin_bswap64((d))
-#define MSG_ID                  0x555   //11 bit standard format ID
-#define TWAI_STD_ID_MASK        0x7FF       /**< Bit mask for 11 bit Standard Frame Format ID */
-
-/**
- * @brief   Set Acceptance Filter
- * @param hw Start address of the TWAI registers
- * @param code Acceptance Code
- * @param mask Acceptance Mask
- * @param single_filter Whether to enable single filter mode
- *
- * @note Must be called in reset mode
- */
-
-static void esp32c3twai_set_acc_filter(uint32_t code, uint32_t mask,
-                                       bool single_filter)
-{
-  uint32_t code_swapped = HAL_SWAP32(code);
-  uint32_t mask_swapped = HAL_SWAP32(mask);
-  caninfo("set_acc_filter\n");
-  for (int i = 0; i < 4; i++)
-    {
-      twai_putreg(0, TWAI_DATA_0_REG + (i * 4),
-                  ((code_swapped >> (i * 8)) & 0xff));
-      twai_putreg(0, TWAI_DATA_4_REG + (i * 4),
-                  ((mask_swapped >> (i * 8)) & 0xff));
-
-/* HAL_FORCE_MODIFY_U32_REG_FIELD(hw->acceptance_filter.acr[i], byte,
- * ((code_swapped >> (i * 8)) & 0xFF));
- * HAL_FORCE_MODIFY_U32_REG_FIELD(hw->acceptance_filter.amr[i], byte,
- * ((mask_swapped >> (i * 8)) & 0xFF));
- */
-    }
-
-  /* hw->mode_reg.afm = single_filter; */
-}
 
 /****************************************************************************
  * Name: esp32c3twai_reset
@@ -427,7 +327,8 @@ static void esp32c3twai_reset(FAR struct can_dev_s *dev)
 {
   FAR struct up_dev_s *priv = (FAR struct up_dev_s *)dev->cd_priv;
   irqstate_t flags;
-  int ret;
+
+  /* int ret; */
 
   caninfo("Reset function\n");
   caninfo("TWAI%d\n", priv->port);
@@ -437,15 +338,15 @@ static void esp32c3twai_reset(FAR struct can_dev_s *dev)
   /* Disable the TWAI and stop ongong transmissions */
 
   uint32_t mode_value = TWAI_RESET_MODE_M | TWAI_LISTEN_ONLY_MODE_M;
-  twai_putreg(priv, TWAI_MODE_REG, mode_value);                 /* Enter Reset Mode */
+  twai_putreg(TWAI_MODE_REG, mode_value);                 /* Enter Reset Mode */
 
-  twai_putreg(priv, TWAI_INT_ENA_REG, 0);                       /* Disable interrupts */
-  twai_getreg(priv, TWAI_STATUS_REG);                           /* Clear status bits */
-  twai_putreg(priv, TWAI_CMD_REG, TWAI_ABORT_TX_M);             /* Abort transmission */
+  twai_putreg(TWAI_INT_ENA_REG, 0);                       /* Disable interrupts */
+  twai_getreg(TWAI_STATUS_REG);                           /* Clear status bits */
+  twai_putreg(TWAI_CMD_REG, TWAI_ABORT_TX_M);             /* Abort transmission */
 
-  twai_putreg(priv, TWAI_TX_ERR_CNT_REG, TWAI_INIT_TEC);        /* TEC */
-  twai_putreg(priv, TWAI_RX_ERR_CNT_REG, TWAI_INIT_REC);        /* REC */
-  twai_putreg(priv, TWAI_ERR_WARNING_LIMIT_REG, TWAI_INIT_EWL); /* EWL */
+  twai_putreg(TWAI_TX_ERR_CNT_REG, TWAI_INIT_TEC);        /* TEC */
+  twai_putreg(TWAI_RX_ERR_CNT_REG, TWAI_INIT_REC);        /* REC */
+  twai_putreg(TWAI_ERR_WARNING_LIMIT_REG, TWAI_INIT_EWL); /* EWL */
 
 /*  static const twai_filter_config_t f_config = {
  *                           .acceptance_code = (MSG_ID << 21),
@@ -453,7 +354,7 @@ static void esp32c3twai_reset(FAR struct can_dev_s *dev)
  *                           .single_filter = true};
  */
 
-  esp32c3twai_set_acc_filter((MSG_ID << 21), ~(TWAI_STD_ID_MASK << 21), true); /* Tested and working */
+  esp32c3twai_set_acc_filter(ACCEPTANCE_CODE, ACCEPTANCE_MASK, true); /* Tested and working */
 
 /* #define TWAI_TIMING_CONFIG_25KBITS()    {.brp = 128, .tseg_1 = 16,
  *                                          .tseg_2 = 8, .sjw = 3,
@@ -469,13 +370,13 @@ static void esp32c3twai_reset(FAR struct can_dev_s *dev)
   timing1 = 15;
   timing1 |= (7 << 4);
 
-  twai_putreg(0, TWAI_BUS_TIMING_0_REG, timing0);
-  twai_putreg(0, TWAI_BUS_TIMING_1_REG, timing1);
+  twai_putreg(TWAI_BUS_TIMING_0_REG, timing0);
+  twai_putreg(TWAI_BUS_TIMING_1_REG, timing1);
 
-  twai_getreg(0, TWAI_BUS_TIMING_0_REG);
-  twai_getreg(0, TWAI_BUS_TIMING_1_REG);
+  twai_getreg(TWAI_BUS_TIMING_0_REG);
+  twai_getreg(TWAI_BUS_TIMING_1_REG);
 
-  caninfo("Reset alive %08x\n", twai_getreg(priv, TWAI_MODE_REG));
+  caninfo("Reset alive %08x\n", twai_getreg(TWAI_MODE_REG));
 
   /* Set bit timing */
 
@@ -490,10 +391,10 @@ static void esp32c3twai_reset(FAR struct can_dev_s *dev)
 
 #ifdef CONFIG_CAN_LOOPBACK
   caninfo("Leave Reset Mode, enter Test Mode\n");
-  twai_putreg(priv, TWAI_MODE_REG, TWAI_SELF_TEST_MODE_M | TWAI_RX_FILTER_MODE_M); /* Leave Reset Mode, enter Test Mode */
+  twai_putreg(TWAI_MODE_REG, TWAI_SELF_TEST_MODE_M); /* Leave Reset Mode, enter Test Mode */
 #else
   caninfo("Leave Reset Mode\n");
-  twai_putreg(priv, TWAI_MODE_REG, TWAI_RX_FILTER_MODE_M);                     /* Leave Reset Mode */
+  twai_putreg(TWAI_MODE_REG, 0);                     /* Leave Reset Mode */
 #endif
 
 /* twai_putcommon(LPC17_40_CANAF_AFMR, CANAF_AFMR_ACCBP);
@@ -525,21 +426,20 @@ static int esp32c3twai_setup(FAR struct can_dev_s *dev)
 {
   caninfo("Enter setup function\n");
   FAR struct up_dev_s *priv = (FAR struct up_dev_s *)dev->cd_priv;
-  uint32_t regval;
   irqstate_t flags;
-  int ret;
+  int ret = OK;
 
-  twai_getreg(0, TWAI_BUS_TIMING_0_REG);
-  twai_getreg(0, TWAI_BUS_TIMING_1_REG);
+  twai_getreg(TWAI_BUS_TIMING_0_REG);
+  twai_getreg(TWAI_BUS_TIMING_1_REG);
 
   caninfo("setup TWAI%d\n", priv->port);
 
   flags = enter_critical_section();
 
-  twai_putreg(priv, TWAI_CMD_REG, TWAI_RELEASE_BUF_M | TWAI_CLR_OVERRUN_M); /* fix */
+  twai_putreg(TWAI_CMD_REG, TWAI_RELEASE_BUF_M | TWAI_CLR_OVERRUN_M); /* fix */
 
-  twai_putreg(priv, TWAI_INT_ENA_REG, TWAI_DEFAULT_INTERRUPTS);
-  regval = twai_getreg(priv, TWAI_INT_RAW_REG);
+  twai_putreg(TWAI_INT_ENA_REG, TWAI_DEFAULT_INTERRUPTS);
+  twai_getreg(TWAI_INT_RAW_REG);          /* clear latched interrupts */
 
 /*  leave_critical_section(flags);
  *
@@ -565,12 +465,14 @@ static int esp32c3twai_setup(FAR struct can_dev_s *dev)
     {
       /* Failed to allocate a CPU interrupt of this type. */
 
+      ret = priv->cpuint;
       leave_critical_section(flags);
 
-      return NULL;
+      return ret;
     }
 
-  if (irq_attach(priv->irq, esp32c3twai_interrupt, priv) != OK)
+  ret = irq_attach(priv->irq, esp32c3twai_interrupt, priv);
+  if (ret != OK)
     {
       /* Failed to attach IRQ, so CPU interrupt must be freed. */
 
@@ -578,14 +480,14 @@ static int esp32c3twai_setup(FAR struct can_dev_s *dev)
       priv->cpuint = -ENOMEM;
       leave_critical_section(flags);
 
-      return NULL;
+      return ret;
     }
 
   /* Enable the CPU interrupt that is linked to the SPI device. */
 
   caninfo("priv->cpuint=%d ena=%08x status=%08x\n", priv->cpuint,
-          twai_getreg(priv, TWAI_INT_ENA_REG),
-          twai_getreg(priv, TWAI_STATUS_REG));
+          twai_getreg(TWAI_INT_ENA_REG),
+          twai_getreg(TWAI_STATUS_REG));
 
   /* irq_attach(ESP32C3_IRQ_TWAI, esp32c3twai_interrupt, priv); */
 
@@ -618,14 +520,33 @@ static int esp32c3twai_setup(FAR struct can_dev_s *dev)
 static void esp32c3twai_shutdown(FAR struct can_dev_s *dev)
 {
   caninfo("Enter shutdown function\n");
-#ifdef CONFIG_DEBUG_CAN_INFO
   FAR struct up_dev_s *priv = (FAR struct up_dev_s *)dev->cd_priv;
+
+#ifdef CONFIG_DEBUG_CAN_INFO
 
   caninfo("shutdown TWAI%d\n", priv->port);
 #endif
 
-  up_disable_irq(ESP32C3_IRQ_TWAI);
-  irq_detach(ESP32C3_IRQ_TWAI);
+/* up_disable_irq(ESP32C3_IRQ_TWAI);
+ * irq_detach(ESP32C3_IRQ_TWAI);
+ */
+
+  if (priv->cpuint != -ENOMEM)
+    {
+      /* Disable cpu interrupt */
+
+      up_disable_irq(priv->cpuint);
+
+      /* Dissociate the IRQ from the ISR */
+
+      irq_detach(priv->irq);
+
+      /* Free cpu interrupt that is attached to this peripheral */
+
+      esp32c3_free_cpuint(priv->periph);
+      priv->cpuint = -ENOMEM;
+    }
+
   return;
 }
 
@@ -657,7 +578,7 @@ static void esp32c3twai_rxint(FAR struct can_dev_s *dev, bool enable)
    */
 
   flags = enter_critical_section();
-  regval = twai_getreg(priv, TWAI_INT_ENA_REG);
+  regval = twai_getreg(TWAI_INT_ENA_REG);
   if (enable)
     {
       caninfo("rxint interrupt enable\n");
@@ -668,7 +589,7 @@ static void esp32c3twai_rxint(FAR struct can_dev_s *dev, bool enable)
       regval &= ~TWAI_RX_INT_ENA_M;
     }
 
-  twai_putreg(priv, TWAI_INT_ENA_REG, regval);
+  twai_putreg(TWAI_INT_ENA_REG, regval);
   leave_critical_section(flags);
   return;
 }
@@ -689,18 +610,19 @@ static void esp32c3twai_rxint(FAR struct can_dev_s *dev, bool enable)
 
 static void esp32c3twai_txint(FAR struct can_dev_s *dev, bool enable)
 {
-  FAR struct up_dev_s *priv = (FAR struct up_dev_s *)dev->cd_priv;
+  /* FAR struct up_dev_s *priv = (FAR struct up_dev_s *)dev->cd_priv; */
+
   caninfo("Enter txint function + status reg %08x + err_code %08x\n",
-          twai_getreg(priv, TWAI_STATUS_REG),
-          twai_getreg(priv, TWAI_ERR_CODE_CAP_REG));
+          twai_getreg(TWAI_STATUS_REG),
+          twai_getreg(TWAI_ERR_CODE_CAP_REG));
   caninfo("Enter txint function + rx_err %08x + tx_err %08x\n",
-          twai_getreg(priv, TWAI_RX_ERR_CNT_REG),
-          twai_getreg(priv, TWAI_TX_ERR_CNT_REG));
+          twai_getreg(TWAI_RX_ERR_CNT_REG),
+          twai_getreg(TWAI_TX_ERR_CNT_REG));
   uint32_t regval;
   irqstate_t flags;
 
   /* caninfo("txint TWAI%d enable: %d + raw %08x\n", priv->port, enable),
-   * twai_getreg(priv, TWAI_INT_RAW_REG);
+   * twai_getreg(TWAI_INT_RAW_REG);
    */
 
   /* Only disabling of the TX interrupt is supported here.  The TX interrupt
@@ -719,9 +641,9 @@ static void esp32c3twai_txint(FAR struct can_dev_s *dev, bool enable)
       /* Disable all TX interrupts */
 
       caninfo("txint interrupt disable\n");
-      regval = twai_getreg(priv, TWAI_INT_ENA_REG);
+      regval = twai_getreg(TWAI_INT_ENA_REG);
       regval &= ~(TWAI_TX_INT_ENA_M);
-      twai_putreg(priv, TWAI_INT_ENA_REG, regval);
+      twai_putreg(TWAI_INT_ENA_REG, regval);
       leave_critical_section(flags);
     }
 }
@@ -766,11 +688,11 @@ static int esp32c3twai_send(FAR struct can_dev_s *dev,
                             FAR struct can_msg_s *msg)
 {
   FAR struct up_dev_s *priv = (FAR struct up_dev_s *)dev->cd_priv;
-  caninfo("Enter send function + status reg %08x\n",
-          twai_getreg(priv, TWAI_STATUS_REG));
+  caninfo("Enter send function + status reg %08x------------------\n",
+          twai_getreg(TWAI_STATUS_REG));
   caninfo("Enter send function + rx_err %08x + tx_err %08x\n",
-          twai_getreg(priv, TWAI_RX_ERR_CNT_REG),
-          twai_getreg(priv, TWAI_TX_ERR_CNT_REG));
+          twai_getreg(TWAI_RX_ERR_CNT_REG),
+          twai_getreg(TWAI_TX_ERR_CNT_REG));
 
 /* uint32_t tid = (uint32_t)msg->cm_hdr.ch_id;
  * uint32_t tfi = (uint32_t)msg->cm_hdr.ch_dlc << 16;
@@ -805,7 +727,7 @@ static int esp32c3twai_send(FAR struct can_dev_s *dev,
 
   /* Pick a transmit buffer */
 
-/* regval = can_getreg(priv, LPC17_40_CAN_SR_OFFSET);
+/* regval = can_getreg(LPC17_40_CAN_SR_OFFSET);
  * if ((regval & CAN_SR_TBS1) != 0)
  *   {
  */
@@ -819,9 +741,9 @@ static int esp32c3twai_send(FAR struct can_dev_s *dev,
        * following is safe because interrupts are disabled here.
        */
 
-  regval  = twai_getreg(priv, TWAI_INT_ENA_REG);
+  regval  = twai_getreg(TWAI_INT_ENA_REG);
   regval |= TWAI_TX_INT_ENA_M;
-  twai_putreg(priv, TWAI_INT_ENA_REG, regval);
+  twai_putreg(TWAI_INT_ENA_REG, regval);
 
   /* Set up the transfer */
 
@@ -837,21 +759,21 @@ static int esp32c3twai_send(FAR struct can_dev_s *dev,
       id = (uint32_t)msg->cm_hdr.ch_id;
       DEBUGASSERT((id & ~TWAI_ID29_MASK) == 0);
       frame_info |= (1 << 7);
-      twai_putreg(priv, TWAI_DATA_0_REG, frame_info);
+      twai_putreg(TWAI_DATA_0_REG, frame_info);
 
       /* tfi |= CAN_TFI_FF; */
 
       id <<= 3;
-      twai_putreg(priv, TWAI_DATA_4_REG, id & 0xff);
+      twai_putreg(TWAI_DATA_4_REG, id & 0xff);
       id >>= 8;
-      twai_putreg(priv, TWAI_DATA_3_REG, id & 0xff);
+      twai_putreg(TWAI_DATA_3_REG, id & 0xff);
       id >>= 8;
-      twai_putreg(priv, TWAI_DATA_2_REG, id & 0xff);
+      twai_putreg(TWAI_DATA_2_REG, id & 0xff);
       id >>= 8;
-      twai_putreg(priv, TWAI_DATA_1_REG, id & 0xff);
+      twai_putreg(TWAI_DATA_1_REG, id & 0xff);
       for (i = 0; i < len; i++)
         {
-          twai_putreg(priv, TWAI_DATA_5_REG + (i * 4), msg->cm_data[i]);
+          twai_putreg(TWAI_DATA_5_REG + (i * 4), msg->cm_data[i]);
         }
     }
   else
@@ -861,40 +783,40 @@ static int esp32c3twai_send(FAR struct can_dev_s *dev,
 
       id = (uint32_t)msg->cm_hdr.ch_id;
       DEBUGASSERT((id & ~TWAI_ID11_MASK) == 0);
-      caninfo("TWAI_DATA_0_REG\n");
-      twai_putreg(priv, TWAI_DATA_0_REG, frame_info);
+      twai_putreg(TWAI_DATA_0_REG, frame_info);
       id <<= 5;
-      twai_putreg(priv, TWAI_DATA_1_REG, (id >> 8) & 0xff);
-      twai_putreg(priv, TWAI_DATA_2_REG, id & 0xff);
+      twai_putreg(TWAI_DATA_1_REG, (id >> 8) & 0xff);
+      twai_putreg(TWAI_DATA_2_REG, id & 0xff);
       for (i = 0; i < len; i++)
         {
-          twai_putreg(priv, TWAI_DATA_3_REG + (i * 4), msg->cm_data[i]);
+          twai_putreg(TWAI_DATA_3_REG + (i * 4), msg->cm_data[i]);
+          caninfo("Send data[%d]: %d\n", i, msg->cm_data[i]);
         }
     }
 
-/*      can_putreg(priv, LPC17_40_CAN_TFI1_OFFSET, tfi);
- *      can_putreg(priv, LPC17_40_CAN_TID1_OFFSET, tid);
- *      can_putreg(priv, LPC17_40_CAN_TDA1_OFFSET,
+/*      can_putreg(LPC17_40_CAN_TFI1_OFFSET, tfi);
+ *      can_putreg(LPC17_40_CAN_TID1_OFFSET, tid);
+ *      can_putreg(LPC17_40_CAN_TDA1_OFFSET,
  *                 *(uint32_t *)&msg->cm_data[0]);
- *      can_putreg(priv, LPC17_40_CAN_TDB1_OFFSET,
+ *      can_putreg(LPC17_40_CAN_TDB1_OFFSET,
  *                 *(uint32_t *)&msg->cm_data[4]);
  */
 
       /* Send the message */
 
   caninfo("Leaving send function + rx_err %08x + tx_err %08x\n",
-          twai_getreg(priv, TWAI_RX_ERR_CNT_REG),
-          twai_getreg(priv, TWAI_TX_ERR_CNT_REG));
+          twai_getreg(TWAI_RX_ERR_CNT_REG),
+          twai_getreg(TWAI_TX_ERR_CNT_REG));
 #ifdef CONFIG_CAN_LOOPBACK
     caninfo("CAN_LOOPBACK %08x\n", TWAI_SELF_RX_REQ_M | TWAI_ABORT_TX_M);
-    twai_putreg(priv, TWAI_CMD_REG, TWAI_SELF_RX_REQ_M | TWAI_ABORT_TX_M);
+    twai_putreg(TWAI_CMD_REG, TWAI_SELF_RX_REQ_M | TWAI_ABORT_TX_M);
 #else
-    twai_putreg(priv, TWAI_CMD_REG, TWAI_TX_REQ_M);
+    twai_putreg(TWAI_CMD_REG, TWAI_TX_REQ_M);
 #endif
 
   caninfo("Leaving 2 send function + rx_err %08x + tx_err %08x\n",
-          twai_getreg(priv, TWAI_RX_ERR_CNT_REG),
-          twai_getreg(priv, TWAI_TX_ERR_CNT_REG));
+          twai_getreg(TWAI_RX_ERR_CNT_REG),
+          twai_getreg(TWAI_TX_ERR_CNT_REG));
 
 /* {
  *   canerr("ERROR: No available transmission buffer, SR: %08" PRIx32 "\n",
@@ -926,8 +848,10 @@ static int esp32c3twai_send(FAR struct can_dev_s *dev,
 static bool esp32c3twai_txready(FAR struct can_dev_s *dev)
 {
   caninfo("Enter txready function\n");
-  FAR struct up_dev_s *priv = (FAR struct up_dev_s *)dev->cd_priv;
-  uint32_t regval = twai_getreg(priv, TWAI_STATUS_REG);
+
+  /* FAR struct up_dev_s *priv = (FAR struct up_dev_s *)dev->cd_priv; */
+
+  uint32_t regval = twai_getreg(TWAI_STATUS_REG);
   caninfo("txready result %d\n", ((regval & TWAI_TX_BUF_ST_M) != 0));
   return ((regval & TWAI_TX_BUF_ST_M) != 0);
 }
@@ -953,8 +877,10 @@ static bool esp32c3twai_txready(FAR struct can_dev_s *dev)
 static bool esp32c3twai_txempty(FAR struct can_dev_s *dev)
 {
   caninfo("Enter txempty function\n");
-  FAR struct up_dev_s *priv = (FAR struct up_dev_s *)dev->cd_priv;
-  uint32_t regval = twai_getreg(priv, TWAI_STATUS_REG);
+
+  /* FAR struct up_dev_s *priv = (FAR struct up_dev_s *)dev->cd_priv; */
+
+  uint32_t regval = twai_getreg(TWAI_STATUS_REG);
   caninfo("txempty result %d\n", ((regval & TWAI_TX_BUF_ST_M) != 0));
   return ((regval & TWAI_TX_BUF_ST_M) != 0);
 }
@@ -997,7 +923,7 @@ static int esp32c3twai_interrupt(int irq, void *context, FAR void *arg)
    * bits)
    */
 
-  regval = twai_getreg(priv, TWAI_INT_RAW_REG);
+  regval = twai_getreg(TWAI_INT_RAW_REG);
   caninfo("CAN%d ICR: %08" PRIx32 "\n", priv->port, regval);
 
   /* Check for a receive interrupt */
@@ -1006,12 +932,13 @@ static int esp32c3twai_interrupt(int irq, void *context, FAR void *arg)
     {
       caninfo("Receive interrupt\n");
 
-      frame_info = twai_getreg(priv, TWAI_DATA_0_REG);
+      frame_info = twai_getreg(TWAI_DATA_0_REG);
 
       /* Construct the CAN header */
 
       if (frame_info & (1 << 6))
         {
+          caninfo("RTR frame\n");
           hdr.ch_rtr    = 1;
         }
 
@@ -1022,10 +949,10 @@ static int esp32c3twai_interrupt(int irq, void *context, FAR void *arg)
 
           hdr.ch_extid = 1;
           hdr.ch_id =
-          (twai_getreg(priv, TWAI_DATA_1_REG) << 21) +
-          (twai_getreg(priv, TWAI_DATA_2_REG) << 13) +
-          (twai_getreg(priv, TWAI_DATA_3_REG) << 5) +
-          (twai_getreg(priv, TWAI_DATA_4_REG) >> 3);
+          (twai_getreg(TWAI_DATA_1_REG) << 21) +
+          (twai_getreg(TWAI_DATA_2_REG) << 13) +
+          (twai_getreg(TWAI_DATA_3_REG) << 5) +
+          (twai_getreg(TWAI_DATA_4_REG) >> 3);
           datastart = TWAI_DATA_5_REG;
         }
       else
@@ -1034,26 +961,31 @@ static int esp32c3twai_interrupt(int irq, void *context, FAR void *arg)
           /* The provided ID should be 11 bits */
 
           hdr.ch_id =
-          (twai_getreg(priv, TWAI_DATA_1_REG) << 3) +
-          (twai_getreg(priv, TWAI_DATA_2_REG) >> 5);
+          (twai_getreg(TWAI_DATA_1_REG) << 3) +
+          (twai_getreg(TWAI_DATA_2_REG) >> 5);
+          caninfo("Receive id: %d\n", hdr.ch_id);
           datastart = TWAI_DATA_3_REG;
         }
-
-      for (i = 0; i < len; i++)
-        {
-          data[i] = twai_getreg(priv, datastart + (i * 4));
-        }
-
-      /* Release the receive buffer */
-
-      twai_putreg(priv, TWAI_CMD_REG, TWAI_RELEASE_BUF_M);
 
       len = frame_info & 0xf;
       if (len > TWAI_MSG_LENGTH) len = TWAI_MSG_LENGTH;
       hdr.ch_dlc = len;
+
+      for (i = 0; i < len; i++)
+        {
+          data[i] = twai_getreg(datastart + (i * 4));
+          caninfo("Receive data[%d]: %d\n", i, data[i]);
+        }
+
+      /* Release the receive buffer */
+
+      twai_putreg(TWAI_CMD_REG, TWAI_RELEASE_BUF_M);
+
 #ifdef CONFIG_CAN_ERRORS
       hdr.ch_error  = 0; /* Error reporting not supported */
 #endif
+      caninfo("Receive interrupt %d %d %d\n", hdr.ch_id, hdr.ch_dlc,
+              hdr.ch_rtr);
       can_receive(dev, &hdr, data);
     }
 
@@ -1065,9 +997,9 @@ static int esp32c3twai_interrupt(int irq, void *context, FAR void *arg)
 
       /* Disable all further TX buffer interrupts */
 
-      regval  = twai_getreg(priv, TWAI_INT_ENA_REG);
+      regval  = twai_getreg(TWAI_INT_ENA_REG);
       regval &= ~TWAI_TX_INT_ENA_M;
-      twai_putreg(priv, TWAI_INT_ENA_REG, regval);
+      twai_putreg(TWAI_INT_ENA_REG, regval);
 
       /* Indicate that the TX is done and a new TX buffer is available */
 
@@ -1079,8 +1011,80 @@ static int esp32c3twai_interrupt(int irq, void *context, FAR void *arg)
 }
 
 /****************************************************************************
+ * Name: esp32c3twai_set_acc_filter
+ *
+ * Description:
+ *   Call to set acceptance filter.
+ *   Must be called in reset mode.
+ *
+ * Input Parameters:
+ *   code - Acceptance Code.
+ *   mask - Acceptance Mask.
+ *   single_filter - Whether to enable single filter mode.
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+static void esp32c3twai_set_acc_filter(uint32_t code, uint32_t mask,
+                                       bool single_filter)
+{
+  caninfo("set_acc_filter\n");
+  uint32_t regval;
+  uint32_t code_swapped = __builtin_bswap32(code);
+  uint32_t mask_swapped = __builtin_bswap32(mask);
+
+  regval = twai_getreg(TWAI_MODE_REG);
+  if (single_filter)
+    {
+      regval |= TWAI_RX_FILTER_MODE_M;
+    }
+  else
+    {
+      regval &= ~(TWAI_RX_FILTER_MODE_M);
+    }
+
+  twai_putreg(TWAI_MODE_REG, regval);
+
+  for (int i = 0; i < 4; i++)
+    {
+      twai_putreg(TWAI_DATA_0_REG + (i * 4),
+                  ((code_swapped >> (i * 8)) & 0xff));
+      twai_putreg(TWAI_DATA_4_REG + (i * 4),
+                  ((mask_swapped >> (i * 8)) & 0xff));
+    }
+}
+
+/****************************************************************************
  * Public Functions
  ****************************************************************************/
+
+#ifdef CONFIG_ESP32C3_TWAI_REGDEBUG_MONITOR
+static void thread_body(void *argument)
+{
+  irqstate_t flags;
+  while (true)
+    {
+      caninfo("---------------------------\nInfo thread!\n");
+      usleep(3000000);
+      flags = enter_critical_section();
+      caninfo("data0: %08x data1 %08x data2 %08x data3 %08x\n",
+                twai_getreg(TWAI_DATA_0_REG),
+                twai_getreg(TWAI_DATA_1_REG),
+                twai_getreg(TWAI_DATA_2_REG),
+                twai_getreg(TWAI_DATA_3_REG));
+      caninfo("status: %08x arb %08x err %08x rx %08x tx %08x cnt %08x\n",
+                      twai_getreg(TWAI_STATUS_REG),
+                      twai_getreg(TWAI_ARB_LOST_CAP_REG),
+                      twai_getreg(TWAI_ERR_CODE_CAP_REG),
+                      twai_getreg(TWAI_RX_ERR_CNT_REG),
+                      twai_getreg(TWAI_TX_ERR_CNT_REG),
+                      twai_getreg(TWAI_RX_MESSAGE_CNT_REG));
+      leave_critical_section(flags);
+    }
+}
+#endif
 
 /****************************************************************************
  * Name: esp32c3_twaiinitialize
@@ -1100,9 +1104,14 @@ FAR struct can_dev_s *esp32c3_twaiinitialize(int port)
 {
   FAR struct can_dev_s *twaidev;
   irqstate_t flags;
-  uint32_t regval;
 
   caninfo("Hello world!\n");
+
+#ifdef CONFIG_ESP32C3_TWAI_REGDEBUG_MONITOR
+  pthread_t thread;
+  pthread_create(&thread, NULL, thread_body, NULL);
+#endif
+
   caninfo("TWAI%d\n",  port);
 
   flags = enter_critical_section();
@@ -1153,6 +1162,16 @@ FAR struct can_dev_s *esp32c3_twaiinitialize(int port)
 
       esp32c3_configgpio(3, INPUT_FUNCTION_1);
       esp32c3_gpio_matrix_in(3, TWAI_RX_IDX, 0);
+
+/*    typedef void func(uint32_t gpio_num, uint32_t signal_idx, bool out_inv,
+ *                      bool oen_inv);
+ *    func* f = (func*)0x400005a4;
+ *    f(2, TWAI_TX_IDX, false, false);
+ *
+ *    typedef void funcg(uint32_t gpio_num, uint32_t signal_idx, bool inv);
+ *    funcg* g = (funcg*)0x400005a0;
+ *    g(3, TWAI_RX_IDX, false);
+ */
 
       twaidev = &g_twai0dev;
     }

@@ -258,18 +258,9 @@ config ESP32C3_I2C0
 	select ESP32C3_I2C
 
 config ESP32C3_TWAI0
-    bool "TWAI/CAN 0"
+    bool "TWAI (CAN) 0"
     default n
     select ESP32C3_TWAI
-
-# Should be relaced
-config ESP32C3_TWAI_REGDEBUG
-    bool "TWAI/CAN Register level debug"
-    depends on DEBUG_CAN_INFO
-    default n
-    ---help---
-        Output detailed register-level TWAI debug information.  Requires also
-        CONFIG_DEBUG_CAN_INFO.
 
 config ESP32C3_RNG
 	bool "Random Number Generator (RNG)"
@@ -426,6 +417,48 @@ config ESP32C3_I2CTIMEOMS
 	default 500
 
 endmenu # I2C configuration
+
+menu "TWAI driver options"
+	depends on ESP32C3_TWAI
+
+config ESP32C3_TWAI0_BITRATE
+	int "TWAI0 bitrate"
+	depends on ESP32C3_TWAI0
+	default 1000000
+	---help---
+		TWAI0 bit rate.  Required if ESP32C3_TWAI0 is defined.
+
+config ESP32C3_TWAI0_SAMPLEP
+	int "TWAI0 sample point"
+	depends on ESP32C3_TWAI0
+	default 80
+	---help---
+		TWAI0 sample point location as a percent value.  Required
+		if ESP32C3_TWAI0 is defined.
+
+config ESP32C3_TWAI0_SJW
+	int "TWAI0 synchronization jump width"
+	default 3
+	---help---
+		SJW limits the number of Time Quanta corrections during bit
+		Resynchronization. Default: 3
+
+config ESP32C3_TWAI0_SAM
+	bool "TWAI0 sampling"
+	default n
+	---help---
+		The bus is sampled 3 times (recommended for low to medium speed buses
+		to spikes on the bus-line).
+
+config ESP32C3_TWAI_REGDEBUG
+    bool "TWAI register level debug"
+    depends on DEBUG_CAN_INFO
+    default n
+    ---help---
+        Output detailed register-level TWAI debug information. Requires also
+        CONFIG_DEBUG_CAN_INFO.
+
+endmenu #ESP32C3_TWAI
 
 menu "SPI configuration"
 	depends on ESP32C3_SPI

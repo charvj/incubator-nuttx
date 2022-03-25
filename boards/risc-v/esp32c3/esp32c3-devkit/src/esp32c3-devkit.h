@@ -162,8 +162,6 @@ int board_i2c_init(void);
  ****************************************************************************/
 
 #ifdef CONFIG_CAN
-/* confirm that not CONFIG_TWAI_DRIVER */
-
 int esp32c3_twai_setup(void);
 #endif
 

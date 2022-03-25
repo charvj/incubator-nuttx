@@ -63,7 +63,6 @@ CSRCS += esp32c3_i2c.c
 endif
 
 ifeq ($(CONFIG_CAN),y)
-# confirm that not CONFIG_TWAI_DRIVER
 CSRCS += esp32c3_twai.c
 endif
 

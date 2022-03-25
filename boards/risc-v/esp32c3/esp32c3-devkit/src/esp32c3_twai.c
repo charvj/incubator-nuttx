@@ -37,7 +37,6 @@
 #include "esp32c3-devkit.h"
 
 #ifdef CONFIG_CAN
-/* confirm that not CONFIG_TWAI_DRIVER */
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -61,12 +60,11 @@
 
 int esp32c3_twai_setup(void)
 {
-#if defined(CONFIG_ESP32C3_TWAI0)
+#ifdef CONFIG_ESP32C3_TWAI0
   struct can_dev_s *twai;
   int ret;
 
-#ifdef CONFIG_ESP32C3_TWAI0
-  /* Call esp32c3_twaiinitialize() to get an instance of the TWAI1
+  /* Call esp32c3_twaiinitialize() to get an instance of the TWAI0
    * interface
    * */
 
@@ -77,7 +75,7 @@ int esp32c3_twai_setup(void)
       return -ENODEV;
     }
 
-  /* Register the TWAI1 driver at "/dev/can0" */
+  /* Register the TWAI0 driver at "/dev/can0" */
 
   ret = can_register("/dev/can0", twai);
   if (ret < 0)
@@ -85,7 +83,6 @@ int esp32c3_twai_setup(void)
       canerr("ERROR: TWAI1 register failed: %d\n", ret);
       return ret;
     }
-#endif
 
   return OK;
 #else
@@ -94,4 +91,3 @@ int esp32c3_twai_setup(void)
 }
 
 #endif /* CONFIG_CAN */
-/* confirm that not CONFIG_TWAI_DRIVER */

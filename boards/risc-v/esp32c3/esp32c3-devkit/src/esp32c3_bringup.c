@@ -224,7 +224,6 @@ int esp32c3_bringup(void)
 #endif
 
 #ifdef CONFIG_CAN
-  /* confirm that not CONFIG_TWAI_DRIVER */
 
   /* Initialize TWAI and register the TWAI driver. */
 

@@ -398,16 +398,24 @@ endmenu # I2C configuration
 menu "TWAI driver options"
 	depends on ESP32C3_TWAI
 
+if ESP32C3_TWAI0
+
+config ESP32C3_TWAI0_TXPIN
+	int "TWAI0 TX Pin"
+	default 2
+
+config ESP32C3_TWAI0_RXPIN
+	int "TWAI0 RX Pin"
+	default 3
+
 config ESP32C3_TWAI0_BITRATE
 	int "TWAI0 bitrate"
-	depends on ESP32C3_TWAI0
 	default 1000000
 	---help---
 		TWAI0 bit rate.  Required if ESP32C3_TWAI0 is defined.
 
 config ESP32C3_TWAI0_SAMPLEP
 	int "TWAI0 sample point"
-	depends on ESP32C3_TWAI0
 	default 80
 	---help---
 		TWAI0 sample point location as a percent value.  Required
@@ -426,6 +434,8 @@ config ESP32C3_TWAI0_SAM
 	---help---
 		The bus is sampled 3 times (recommended for low to medium speed buses
 		to spikes on the bus-line).
+
+endif # ESP32C3_TWAI0
 
 config ESP32C3_TWAI_REGDEBUG
     bool "TWAI register level debug"

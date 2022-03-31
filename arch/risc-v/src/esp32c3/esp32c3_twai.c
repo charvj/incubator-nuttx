@@ -38,14 +38,15 @@
 #include <nuttx/arch.h>
 #include <nuttx/can/can.h>
 
-#include "riscv_arch.h"
+#include "riscv_internal.h"
 
-#include "hardware/esp32c3_system.h"
-#include "hardware/esp32c3_gpio_sigmap.h"
 #include "esp32c3_gpio.h"
 #include "esp32c3_twai.h"
 #include "esp32c3_irq.h"
 #include "esp32c3_clockconfig.h"
+
+#include "hardware/esp32c3_system.h"
+#include "hardware/esp32c3_gpio_sigmap.h"
 
 #if defined(CONFIG_ESP32C3_TWAI)
 

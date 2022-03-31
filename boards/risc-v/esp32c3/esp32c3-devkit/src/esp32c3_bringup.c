@@ -224,7 +224,6 @@ int esp32c3_bringup(void)
 
   /* Initialize TWAI and register the TWAI driver. */
 
-  syslog(LOG_ERR, "ERROR: esp32c3_twai_setup test\n");
   ret = esp32c3_twai_setup();
   if (ret < 0)
     {

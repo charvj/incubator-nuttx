@@ -458,6 +458,20 @@ config ESP32C3_TWAI0_SAM
 		The bus is sampled 3 times (recommended for low to medium speed buses
 		to spikes on the bus-line).
 
+
+config ESP32C3_TWAI0_CLKOUT
+	bool "TWAI0 CLKOUT"
+	default n
+	---help---
+		Enable the external CLKOUT pin.
+
+config ESP32C3_TWAI0_CLKOUT_PIN
+	int "TWAI0 CLKOUT pin"
+	default 3
+	depends on ESP32C3_TWAI0_CLKOUT
+	---help---
+		Choose the external CLKOUT pin.
+
 endif # ESP32C3_TWAI0
 
 config ESP32C3_TWAI_REGDEBUG

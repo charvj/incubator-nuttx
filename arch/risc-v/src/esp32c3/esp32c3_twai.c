@@ -1230,6 +1230,12 @@ struct can_dev_s *esp32c3_twaiinitialize(int port)
       esp32c3_configgpio(CONFIG_ESP32C3_TWAI0_RXPIN, INPUT_FUNCTION_1);
       esp32c3_gpio_matrix_in(CONFIG_ESP32C3_TWAI0_RXPIN, TWAI_RX_IDX, 0);
 
+#ifdef CONFIG_ESP32C3_TWAI0_CLKOUT
+      esp32c3_gpio_matrix_out(CONFIG_ESP32C3_TWAI0_CLKOUT_PIN,
+                              TWAI_CLKOUT_IDX, 0, 0);
+      esp32c3_configgpio(CONFIG_ESP32C3_TWAI0_CLKOUT_PIN, OUTPUT_FUNCTION_1);
+#endif
+
       twaidev = &g_twai0dev;
     }
   else
